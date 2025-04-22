@@ -1,0 +1,122 @@
+version: '3'
+
+services:
+  influxdb:
+    image: influxdb:2.0
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=password
+      - DOCKER_INFLUXDB_INIT_ORG=solar-to-laser
+      - DOCKER_INFLUXDB_INIT_BUCKET=solar_data
+
+  postgres:
+    image: postgres:13
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=solar_to_laser
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  data-collection:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.data-collection
+    ports:
+      - "8000:8000"
+    depends_on:
+      - influxdb
+      - rabbitmq
+    environment:
+      - INFLUXDB_HOST=influxdb
+      - INFLUXDB_PORT=8086
+      - INFLUXDB_DATABASE=solar_data
+      - RABBITMQ_HOST=rabbitmq
+
+  audio-conversion:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.audio-conversion
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - POSTGRES_HOST=postgres
+
+  rave-processing:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rave-processing
+    ports:
+      - "8002:8002"
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - POSTGRES_HOST=postgres
+
+  vector-generation:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vector-generation
+    ports:
+      - "8003:8003"
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - POSTGRES_HOST=postgres
+
+  laser-control:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.laser-control
+    ports:
+      - "8004:8004"
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - POSTGRES_HOST=postgres
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "80:80"
+    depends_on:
+      - data-collection
+      - audio-conversion
+      - rave-processing
+      - vector-generation
+      - laser-control
+    environment:
+      - DATA_COLLECTION_URL=http://data-collection:8000
+      - AUDIO_CONVERSION_URL=http://audio-conversion:8001
+      - RAVE_PROCESSING_URL=http://rave-processing:8002
+      - VECTOR_GENERATION_URL=http://vector-generation:8003
+      - LASER_CONTROL_URL=http://laser-control:8004
+
+volumes:
+  influxdb-data:
+  postgres-data:
